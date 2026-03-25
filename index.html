@@ -1,0 +1,721 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
+const STORAGE_KEY = "musteri-kabul-mvp-v1";
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("tr-TR");
+}
+
+function downloadFile(filename, content, type = "application/json") {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function toCsv(rows) {
+  const headers = [
+    "Kayıt No",
+    "Kayıt Tarihi",
+    "Müşteri",
+    "Telefon",
+    "Cihaz Türü",
+    "Marka",
+    "Model",
+    "IMEI/Seri No",
+    "Şikayet",
+    "Teslim Alan",
+    "Durum",
+  ];
+
+  const escapeCsv = (v) => {
+    const value = String(v ?? "");
+    if (value.includes(",") || value.includes("\n") || value.includes('"')) {
+      return '"' + value.replace(/"/g, '""') + '"';
+    }
+    return value;
+  };
+
+  const lines = rows.map((r) => [
+    r.recordNo,
+    formatDateTime(r.createdAt),
+    r.customerName,
+    r.phone,
+    r.deviceType,
+    r.brand,
+    r.model,
+    r.serialNo,
+    r.issue,
+    r.receiver,
+    r.status,
+  ].map(escapeCsv).join(","));
+
+  return [headers.join(","), ...lines].join("\n");
+}
+
+function Card({ className = "", children }) {
+  return <div className={`rounded-3xl border border-white/10 bg-zinc-900/90 text-white ${className}`}>{children}</div>;
+}
+
+function CardHeader({ children, className = "" }) {
+  return <div className={`p-6 pb-3 ${className}`}>{children}</div>;
+}
+
+function CardTitle({ children, className = "" }) {
+  return <h2 className={`text-lg font-semibold ${className}`}>{children}</h2>;
+}
+
+function CardContent({ children, className = "" }) {
+  return <div className={`p-6 pt-0 ${className}`}>{children}</div>;
+}
+
+function Button({ children, className = "", variant = "default", type = "button", ...props }) {
+  const styles = {
+    default: "bg-white text-black hover:bg-zinc-200",
+    secondary: "bg-zinc-800 text-white hover:bg-zinc-700",
+    outline: "border border-white/10 bg-transparent text-white hover:bg-white/5",
+    destructive: "bg-red-600 text-white hover:bg-red-500",
+  };
+  return (
+    <button
+      type={type}
+      className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-medium transition ${styles[variant] || styles.default} ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Input(props) {
+  return <input {...props} className={`w-full rounded-2xl border border-white/10 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 ${props.className || ""}`} />;
+}
+
+function Textarea(props) {
+  return <textarea {...props} className={`w-full rounded-2xl border border-white/10 bg-zinc-950 px-3 py-2 text-sm text-white outline-none placeholder:text-zinc-500 ${props.className || ""}`} />;
+}
+
+function Label({ children }) {
+  return <label className="text-sm text-zinc-300">{children}</label>;
+}
+
+function Badge({ children, className = "" }) {
+  return <span className={`inline-flex rounded-xl bg-white/10 px-3 py-1 text-xs text-white ${className}`}>{children}</span>;
+}
+
+function Separator() {
+  return <div className="h-px w-full bg-white/10" />;
+}
+
+function Icon({ children }) {
+  return <span className="inline-flex h-5 w-5 items-center justify-center text-sm">{children}</span>;
+}
+
+function SignaturePad({ value, onChange }) {
+  const canvasRef = useRef(null);
+  const drawingRef = useRef(false);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#ffffff";
+    ctx.fillStyle = "#09090b";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (value) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.fillStyle = "#09090b";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+      };
+      img.src = value;
+    }
+  }, [value]);
+
+  const getPos = (e) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const point = "touches" in e ? e.touches[0] : e;
+    return {
+      x: point.clientX - rect.left,
+      y: point.clientY - rect.top,
+    };
+  };
+
+  const start = (e) => {
+    drawingRef.current = true;
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const move = (e) => {
+    if (!drawingRef.current) return;
+    if (e.cancelable) e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getPos(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const end = () => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    onChange(canvasRef.current.toDataURL("image/png"));
+  };
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#09090b";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    onChange("");
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-white/10 bg-black/50 p-2">
+        <canvas
+          ref={canvasRef}
+          width={700}
+          height={220}
+          className="w-full rounded-xl touch-none bg-zinc-950"
+          onMouseDown={start}
+          onMouseMove={move}
+          onMouseUp={end}
+          onMouseLeave={end}
+          onTouchStart={start}
+          onTouchMove={move}
+          onTouchEnd={end}
+        />
+      </div>
+      <div className="flex justify-end">
+        <Button variant="secondary" onClick={clear}>İmzayı Temizle</Button>
+      </div>
+    </div>
+  );
+}
+
+function Modal({ open, onClose, children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-white/10 bg-zinc-950 text-white shadow-2xl">
+        <div className="flex justify-end p-3">
+          <Button variant="outline" onClick={onClose}>✕</Button>
+        </div>
+        <div className="px-6 pb-6">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+export default function MusteriKabulMVP() {
+  const emptyForm = {
+    customerName: "",
+    phone: "",
+    email: "",
+    address: "",
+    deviceType: "Telefon",
+    brand: "",
+    model: "",
+    serialNo: "",
+    accessories: "",
+    issue: "",
+    notes: "",
+    receiver: "",
+    status: "Kabul Edildi",
+    signature: "",
+  };
+
+  const [records, setRecords] = useState([]);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [tabletMode, setTabletMode] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("Tümü");
+  const [activeTab, setActiveTab] = useState("kayit");
+  const [company, setCompany] = useState({
+    name: "Servis Merkezim",
+    phone: "0 (5__) ___ __ __",
+    email: "info@firma.com",
+    address: "Firma adresi buraya gelecek",
+  });
+  const [form, setForm] = useState(emptyForm);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      try {
+        setRecords(JSON.parse(raw));
+      } catch {
+        setRecords([]);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  }, [records]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return records.filter((r) => {
+      const matchesSearch = !q || [r.recordNo, r.customerName, r.phone, r.brand, r.model, r.serialNo, r.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+      const matchesStatus = statusFilter === "Tümü" || r.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [records, search, statusFilter]);
+
+  const stats = useMemo(() => ({
+    total: records.length,
+    pending: records.filter((r) => r.status === "Kabul Edildi").length,
+    service: records.filter((r) => r.status === "Serviste").length,
+    completed: records.filter((r) => r.status === "Teslime Hazır").length,
+  }), [records]);
+
+  const updateForm = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  const updateRecordStatus = (id, status) => {
+    setRecords((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+    setSelected((prev) => (prev && prev.id === id ? { ...prev, status } : prev));
+  };
+
+  const duplicateRecordToForm = (record) => {
+    setForm({
+      customerName: record.customerName || "",
+      phone: record.phone || "",
+      email: record.email || "",
+      address: record.address || "",
+      deviceType: record.deviceType || "Telefon",
+      brand: record.brand || "",
+      model: record.model || "",
+      serialNo: record.serialNo || "",
+      accessories: record.accessories || "",
+      issue: record.issue || "",
+      notes: record.notes || "",
+      receiver: record.receiver || "",
+      status: record.status || "Kabul Edildi",
+      signature: record.signature || "",
+    });
+    setActiveTab("kayit");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const saveRecord = () => {
+    if (!form.customerName || !form.phone || !form.deviceType || !form.issue) {
+      alert("Lütfen müşteri adı, telefon, cihaz türü ve şikayet alanlarını doldur.");
+      return;
+    }
+
+    const canUseUUID = typeof globalThis !== "undefined" && globalThis.crypto && typeof globalThis.crypto.randomUUID === "function";
+    const record = {
+      id: canUseUUID ? globalThis.crypto.randomUUID() : String(Date.now()),
+      recordNo: `SRV-${Date.now().toString().slice(-6)}`,
+      createdAt: new Date().toISOString(),
+      ...form,
+    };
+
+    setRecords((prev) => [record, ...prev]);
+    setForm(emptyForm);
+    setActiveTab("liste");
+  };
+
+  const printReceipt = (record) => {
+    const win = window.open("", "_blank", "width=900,height=1200");
+    if (!win) return;
+
+    win.document.write(`
+      <html>
+        <head>
+          <title>Servis Fişi - ${record.recordNo}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 32px; color: #111; }
+            .box { border: 1px solid #ccc; border-radius: 14px; padding: 18px; margin-bottom: 16px; }
+            h1,h2,h3,p { margin: 0 0 10px 0; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+            .label { color: #666; font-size: 12px; text-transform: uppercase; margin-bottom: 4px; }
+            .value { font-size: 14px; font-weight: 600; }
+            img { max-width: 100%; border: 1px solid #ddd; border-radius: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="box">
+            <h1>${company.name}</h1>
+            <p>${company.phone} · ${company.email}</p>
+            <p>${company.address}</p>
+          </div>
+          <div class="box">
+            <h2>Servis Kabul Fişi</h2>
+            <p><strong>Kayıt No:</strong> ${record.recordNo}</p>
+            <p><strong>Tarih:</strong> ${formatDateTime(record.createdAt)}</p>
+            <p><strong>Durum:</strong> ${record.status}</p>
+          </div>
+          <div class="grid">
+            <div class="box">
+              <h3>Müşteri Bilgileri</h3>
+              <div class="label">Ad Soyad</div><div class="value">${record.customerName || "-"}</div>
+              <div class="label">Telefon</div><div class="value">${record.phone || "-"}</div>
+              <div class="label">E-posta</div><div class="value">${record.email || "-"}</div>
+              <div class="label">Adres</div><div class="value">${record.address || "-"}</div>
+            </div>
+            <div class="box">
+              <h3>Cihaz Bilgileri</h3>
+              <div class="label">Cihaz Türü</div><div class="value">${record.deviceType || "-"}</div>
+              <div class="label">Marka / Model</div><div class="value">${record.brand || "-"} ${record.model || ""}</div>
+              <div class="label">IMEI / Seri No</div><div class="value">${record.serialNo || "-"}</div>
+              <div class="label">Aksesuarlar</div><div class="value">${record.accessories || "-"}</div>
+            </div>
+          </div>
+          <div class="box">
+            <h3>Arıza / Şikayet</h3>
+            <p>${record.issue || "-"}</p>
+          </div>
+          <div class="box">
+            <h3>Servis Notu</h3>
+            <p>${record.notes || "-"}</p>
+          </div>
+          <div class="box">
+            <h3>Müşteri İmzası</h3>
+            ${record.signature ? `<img src="${record.signature}" alt="İmza" />` : "<p>İmza alınmadı.</p>"}
+          </div>
+        </body>
+      </html>
+    `);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
+  };
+
+  const deleteRecord = (id) => {
+    setRecords((prev) => prev.filter((r) => r.id !== id));
+    if (selected && selected.id === id) setSelected(null);
+  };
+
+  const exportJson = () => downloadFile("musteri-kayitlari.json", JSON.stringify(records, null, 2));
+  const exportCsv = () => downloadFile("musteri-kayitlari.csv", toCsv(records), "text/csv;charset=utf-8;");
+
+  const tabs = tabletMode
+    ? [
+        { key: "kayit", label: "Yeni Kayıt" },
+        { key: "liste", label: "Kayıtlar" },
+      ]
+    : [
+        { key: "kayit", label: "Yeni Kayıt" },
+        { key: "liste", label: "Kayıtlar" },
+        { key: "kurulum", label: "Sonraki Adım" },
+      ];
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-white">
+      <div className={`${tabletMode ? "max-w-3xl" : "max-w-7xl"} mx-auto p-4 md:p-8`}>
+        <div className="mb-8 grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
+          <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-zinc-900 to-black p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3"><Icon>📋</Icon></div>
+                <div>
+                  <h1 className="text-2xl font-bold tracking-tight">{company.name}</h1>
+                  <p className="text-sm text-zinc-400">Müşteri Kabul Sistemi · ilk çalışan sürüm</p>
+                </div>
+              </div>
+              <Button variant="secondary" onClick={() => setTabletMode((v) => !v)}>
+                <Icon>{tabletMode ? "🖥️" : "📱"}</Icon>
+                {tabletMode ? "Panel Modu" : "Tablet Modu"}
+              </Button>
+            </div>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <Badge>Karanlık Tema</Badge>
+              <Badge>Tablet Uyumlu</Badge>
+              <Badge>İmza Alanı</Badge>
+              <Badge>Servis Fişi Yazdırma</Badge>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {[
+              { label: "Toplam Kayıt", value: stats.total, icon: "📄" },
+              { label: "Yeni Kabul", value: stats.pending, icon: "🙍" },
+              { label: "Serviste", value: stats.service, icon: "🔧" },
+              { label: "Teslime Hazır", value: stats.completed, icon: "✅" },
+            ].map((item) => (
+              <Card key={item.label} className="bg-zinc-900/80">
+                <CardContent className="p-5">
+                  <div className="mb-3 flex items-center justify-between">
+                    <Icon>{item.icon}</Icon>
+                    <span className="text-xs text-zinc-500">Canlı</span>
+                  </div>
+                  <div className="text-2xl font-bold">{item.value}</div>
+                  <div className="text-sm text-zinc-400">{item.label}</div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+
+        {!tabletMode && (
+          <Card className="mb-4">
+            <CardHeader>
+              <CardTitle>Firma Bilgileri</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="space-y-2">
+                <Label>Firma Adı</Label>
+                <Input value={company.name} onChange={(e) => setCompany((p) => ({ ...p, name: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Telefon</Label>
+                <Input value={company.phone} onChange={(e) => setCompany((p) => ({ ...p, phone: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>E-posta</Label>
+                <Input value={company.email} onChange={(e) => setCompany((p) => ({ ...p, email: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Adres</Label>
+                <Input value={company.address} onChange={(e) => setCompany((p) => ({ ...p, address: e.target.value }))} />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <div className="mb-4 grid w-full gap-2 rounded-2xl bg-zinc-900 p-1" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              className={`rounded-2xl px-4 py-2 text-sm font-medium transition ${activeTab === tab.key ? "bg-white text-black" : "text-white hover:bg-white/5"}`}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === "kayit" && (
+          <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Servis Kabul Formu</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Müşteri Adı Soyadı</Label>
+                  <Input value={form.customerName} onChange={(e) => updateForm("customerName", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Telefon</Label>
+                  <Input value={form.phone} onChange={(e) => updateForm("phone", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>E-posta</Label>
+                  <Input value={form.email} onChange={(e) => updateForm("email", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Teslim Alan Personel</Label>
+                  <Input value={form.receiver} onChange={(e) => updateForm("receiver", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Cihaz Türü</Label>
+                  <Input value={form.deviceType} onChange={(e) => updateForm("deviceType", e.target.value)} placeholder="Telefon / Tablet / Laptop" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Durum</Label>
+                  <Input value={form.status} onChange={(e) => updateForm("status", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Marka</Label>
+                  <Input value={form.brand} onChange={(e) => updateForm("brand", e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Model</Label>
+                  <Input value={form.model} onChange={(e) => updateForm("model", e.target.value)} />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>IMEI / Seri No</Label>
+                  <Input value={form.serialNo} onChange={(e) => updateForm("serialNo", e.target.value)} />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Adres</Label>
+                  <Textarea value={form.address} onChange={(e) => updateForm("address", e.target.value)} className="min-h-[90px]" />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Beraber Gelen Ekipmanlar</Label>
+                  <Textarea value={form.accessories} onChange={(e) => updateForm("accessories", e.target.value)} className="min-h-[90px]" placeholder="Şarj cihazı, kablo, kutu, kılıf..." />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Müşteri Şikayeti / Arıza Açıklaması</Label>
+                  <Textarea value={form.issue} onChange={(e) => updateForm("issue", e.target.value)} className="min-h-[110px]" />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Servis Notu</Label>
+                  <Textarea value={form.notes} onChange={(e) => updateForm("notes", e.target.value)} className="min-h-[90px]" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Icon>✍️</Icon> Müşteri İmzası</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <SignaturePad value={form.signature} onChange={(val) => updateForm("signature", val)} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Hızlı İşlemler</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-3 sm:grid-cols-2">
+                  <Button onClick={saveRecord}><Icon>💾</Icon> Kaydı Oluştur</Button>
+                  <Button variant="secondary" onClick={exportCsv}><Icon>⬇️</Icon> CSV İndir</Button>
+                  <Button variant="secondary" onClick={exportJson}><Icon>⬇️</Icon> JSON İndir</Button>
+                  <Button variant="outline" onClick={() => setForm(emptyForm)}>Formu Sıfırla</Button>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "liste" && (
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <CardTitle>Kayıt Listesi</CardTitle>
+                <div className="flex w-full flex-col gap-3 md:max-w-2xl md:flex-row">
+                  <div className="relative w-full">
+                    <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">🔎</div>
+                    <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Kayıt no, müşteri, telefon, model..." className="pl-9" />
+                  </div>
+                  <Input value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} placeholder="Tümü / Kabul Edildi / Serviste / Teslime Hazır" />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3">
+                {filtered.length === 0 && (
+                  <div className="rounded-2xl border border-dashed border-white/10 bg-black/20 p-10 text-center text-zinc-400">
+                    Henüz kayıt yok. İlk müşteri kabul formunu oluşturup burada listeleyebilirsin.
+                  </div>
+                )}
+
+                {filtered.map((record) => (
+                  <div key={record.id} className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-lg font-semibold">{record.customerName}</span>
+                          <Badge>{record.recordNo}</Badge>
+                          <Badge>{record.status}</Badge>
+                        </div>
+                        <div className="text-sm text-zinc-400">{record.phone} · {record.deviceType} · {record.brand} {record.model}</div>
+                        <div className="text-sm text-zinc-500">Kayıt: {formatDateTime(record.createdAt)}</div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => updateRecordStatus(record.id, "Kabul Edildi")}>Kabul</Button>
+                        <Button variant="outline" onClick={() => updateRecordStatus(record.id, "Serviste")}>Serviste</Button>
+                        <Button variant="outline" onClick={() => updateRecordStatus(record.id, "Teslime Hazır")}>Hazır</Button>
+                        <Button variant="secondary" onClick={() => setSelected(record)}>Detay</Button>
+                        <Button variant="secondary" onClick={() => duplicateRecordToForm(record)}>Forma Al</Button>
+                        <Button variant="secondary" onClick={() => printReceipt(record)}><Icon>⬇️</Icon> Fiş</Button>
+                        <Button variant="destructive" onClick={() => deleteRecord(record.id)}><Icon>🗑️</Icon> Sil</Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === "kurulum" && !tabletMode && (
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle>Bu ilk sürümde hazır olanlar</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 text-sm text-zinc-300">
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">• Müşteri kabul formu</div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">• Tablet ekranında imza alma alanı</div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">• Kayıtların cihazda tutulması</div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">• Arama ve detay görüntüleme</div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">• CSV ve JSON dışa aktarma</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Sıradaki gerçek sürüm</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-zinc-300">
+                <div className="flex items-start gap-3"><Icon>📱</Icon><span>Tablet için tam ekran müşteri kabul modu</span></div>
+                <div className="flex items-start gap-3"><Icon>🖥️</Icon><span>PC tarafında yönetim paneli ve raporlama</span></div>
+                <div className="flex items-start gap-3"><Icon>📄</Icon><span>PDF servis fişi oluşturma</span></div>
+                <div className="flex items-start gap-3"><Icon>💾</Icon><span>Bulut veritabanı ile merkezi kayıt</span></div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        <Modal open={!!selected} onClose={() => setSelected(null)}>
+          {selected && (
+            <div className="space-y-4">
+              <CardTitle>{selected.customerName} · {selected.recordNo}</CardTitle>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <h3 className="mb-2 font-semibold">Müşteri Bilgileri</h3>
+                  <div className="space-y-2 text-sm text-zinc-300">
+                    <div><span className="text-zinc-500">Telefon:</span> {selected.phone}</div>
+                    <div><span className="text-zinc-500">E-posta:</span> {selected.email || "-"}</div>
+                    <div><span className="text-zinc-500">Adres:</span> {selected.address || "-"}</div>
+                    <div><span className="text-zinc-500">Teslim Alan:</span> {selected.receiver || "-"}</div>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="mb-2 font-semibold">Cihaz Bilgileri</h3>
+                  <div className="space-y-2 text-sm text-zinc-300">
+                    <div><span className="text-zinc-500">Tür:</span> {selected.deviceType}</div>
+                    <div><span className="text-zinc-500">Marka / Model:</span> {selected.brand} {selected.model}</div>
+                    <div><span className="text-zinc-500">Seri No:</span> {selected.serialNo || "-"}</div>
+                    <div><span className="text-zinc-500">Aksesuar:</span> {selected.accessories || "-"}</div>
+                  </div>
+                </div>
+              </div>
+              <Separator />
+              <div className="space-y-3 text-sm text-zinc-300">
+                <div>
+                  <div className="mb-1 font-semibold">Müşteri Şikayeti</div>
+                  <div className="rounded-2xl border border-white/10 bg-black/30 p-3">{selected.issue}</div>
+                </div>
+                <div>
+                  <div className="mb-1 font-semibold">Servis Notu</div>
+                  <div className="rounded-2xl border border-white/10 bg-black/30 p-3">{selected.notes || "-"}</div>
+                </div>
+                <div>
+                  <div className="mb-1 font-semibold">İmza</div>
+                  {selected.signature ? (
+                    <img src={selected.signature} alt="İmza" className="rounded-2xl border border-white/10" />
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-white/10 p-6 text-zinc-500">İmza yok</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </Modal>
+      </div>
+    </div>
+  );
+}
